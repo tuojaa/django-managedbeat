@@ -10,7 +10,9 @@ from datetime import timedelta
 import uuid
 
 from django.conf import settings
-from django.core.cache import cache
+from django.core.cache import caches
+from django.core.cache.backends.locmem import LocMemCache
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management import BaseCommand
 from django.utils import timezone
 import time
@@ -39,6 +41,24 @@ class Command(BaseCommand):
         except:
             logger.error("celery beat throws: %s",traceback.format_exc())
 
+    def cache_sanity_check(self, cache):
+        """
+        Check if cache is properly configured
+
+        :return:
+        """
+        tmp_key = uuid.uuid4()
+        tmp_value = uuid.uuid4()
+        try:
+            cache.set(tmp_key, tmp_value)
+            if cache.get(tmp_key) != tmp_value:
+                raise ImproperlyConfigured("Managedbeat requires reliable cache framework")
+        finally:
+            cache.delete(tmp_key)
+
+        if type(cache) is LocMemCache:
+            logger.warning("Managedbeat should not be used with LocMemCache in multi-instance configuration; it will simply not work")
+
     def handle(self, *args, **options):
         """
         Entry point for Django admin command managedbeat
@@ -54,6 +74,13 @@ class Command(BaseCommand):
         cache_key = managedbeat_settings.get("cache_key", "managedbeat_status")
         leader_timeout = managedbeat_settings.get("leader_expire", 60)
         status_poll_interval = managedbeat_settings.get("status_poll_interval", 15)
+
+        cache_name = managedbeat_settings.get("cache", "default")
+
+        cache = caches[cache_name]
+
+        # Perform a quick sanity check
+        self.cache_sanity_check(cache)
 
         # generate a unique identifier for this instance
         unique_id = uuid.uuid4()
@@ -88,9 +115,14 @@ class Command(BaseCommand):
                 "unique_id": unique_id
             }
             logger.debug("set_leader(%s)", status)
-            cache.put(cache_key, pickle.dumps(status))
+            cache.set(cache_key, pickle.dumps(status))
 
         def reset_leader():
+            """
+            Clear leader information
+
+            :return: None
+            """
             cache.delete(cache_key)
 
         while(True):
@@ -130,4 +162,8 @@ class Command(BaseCommand):
                 try:
                     thr.join(status_poll_interval)
                 except:
+                    reset_leader()
                     os._exit(255)
+
+            # Celerybeat thread is no longer alive, reset leader status
+            reset_leader()
