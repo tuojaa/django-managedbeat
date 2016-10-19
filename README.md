@@ -30,6 +30,10 @@ MANAGEDBEAT = {
   "status_poll_interval": 15
 }
 
+## Usage
+
+Simply run managedbeat command from Django manage.py. It is intended to be a drop-in replacement for celerybeat command
+
 ## Limitations
 
 Managedbeat expects the cache framework to be fully configured and that same cache is available from all participating
