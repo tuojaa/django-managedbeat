@@ -48,8 +48,12 @@ class Command(BaseCommand):
         :return: None
         """
 
-        # Try to get cache prefix from Django settings
-        cache_prefix = getattr(settings, "MANAGEDBEAT_CACHE_PREFIX", "managedbeat_")
+        # Try to get settings
+        managedbeat_settings = getattr(settings, "MANAGEDBEAT", {})
+
+        cache_key = managedbeat_settings.get("cache_key", "managedbeat_status")
+        leader_timeout = managedbeat_settings.get("leader_expire", 60)
+        status_poll_interval = managedbeat_settings.get("status_poll_interval", 15)
 
         # generate a unique identifier for this instance
         unique_id = uuid.uuid4()
@@ -61,12 +65,12 @@ class Command(BaseCommand):
 
             :return: Leader's unique ID or None if no leader has been active for 1 minute
             """
-            jstatus = cache.get(cache_prefix+"leader-instance")
+            jstatus = cache.get(cache_key)
             try:
                 status = pickle.loads(jstatus)
                 now = timezone.now()
 
-                if (now - status['timestamp']) > timedelta(minutes = 1):
+                if (now - status['timestamp']) > timedelta(seconds=leader_timeout):
                     return None
                 return status['unique_id']
             except:
@@ -84,7 +88,10 @@ class Command(BaseCommand):
                 "unique_id": unique_id
             }
             logger.debug("set_leader(%s)", status)
-            cache.put(cache_prefix+"leader-instance", pickle.dumps(status))
+            cache.put(cache_key, pickle.dumps(status))
+
+        def reset_leader():
+            cache.delete(cache_key)
 
         while(True):
             # Get leader information
@@ -93,7 +100,7 @@ class Command(BaseCommand):
             if leader:
                 # if we have a leader that is active, try sleeping for 15 seconds before checking again
                 try:
-                    time.sleep(15)
+                    time.sleep(status_poll_interval)
                 except:
                     # in case of interrupted sleep or any unexpected exception, kill everything
                     #   NOTE: supervisord or similar should then attempt to restart the command on this instance
@@ -121,6 +128,6 @@ class Command(BaseCommand):
 
                 # wait for the thread to exit
                 try:
-                    thr.join(5)
+                    thr.join(status_poll_interval)
                 except:
                     os._exit(255)
