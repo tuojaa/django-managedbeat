@@ -37,6 +37,10 @@ class Command(BaseCommand):
         except:
             pass
         try:
+            os.chdir("/")
+        except:
+            logger.error("Unable to chdir to /")
+        try:
             app.start(['celery','beat','--pidfile=/tmp/celerybeat.pid'])
         except:
             logger.error("celery beat throws: %s",traceback.format_exc())
