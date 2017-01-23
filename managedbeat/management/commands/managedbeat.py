@@ -89,6 +89,13 @@ class Command(BaseCommand):
         # generate a unique identifier for this instance
         unique_id = uuid.uuid4()
 
+        # first, sleep for status_poll_interval to prevent restarting multiple times if leader is disputed
+        try:
+            time.sleep(status_poll_interval)
+        except:
+            # in case of interrupted sleep or any unexpected exception, kill everything
+            #   NOTE: supervisord or similar should then attempt to restart the command on this instance
+            os._exit(255)
 
         def get_leader():
             """
